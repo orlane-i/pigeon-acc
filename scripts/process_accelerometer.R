@@ -2,28 +2,30 @@
 ## accelerometry data and correct the pitch based on average pitch during flight. Data
 ## are then subsampled to a 1 sec interval to make file sizes more manageable.
 
+# load dat
+load(paste0(output_activity_data,"dat_all_indiv_script1.RData"))
+
 require(ggplot2)
 options(digits.secs=4)
 
+# remove GPS data to keep 20 data per sec for rolling functions
+datacc <- subset(dat, !datatype == "GPS")
+View(datacc)
+
 # Set values for calculating all accelerometer derived measures
-myFreq <- 25 # Sampling frequency of the accelerometers
-myWindow <- 2 # Size of window that you want to average over - we used 2 sec, but a larger window may give more consistent results for general behaviours
+myFreq <- 20 # Sampling frequency of the accelerometers
+myWindow <- 1 # Size of window that you want to average over - we used 2 sec, but a larger window may give more consistent results for general behaviours
 mySubsample <- 1 # Rate to subsample during WBF calculations - it is too slow to do all rows
 myWBFWindow <- 5 # Window size for calculating peak frequency - 2 seconds is too low for fft
 myThreshold <- 0.5 # This is a threshold for calculating wing beat frequency, 
 # and wing beats with amplitudes below this threshold will be given a WNF value of 0 
 
 ###########################################
-# Set working directory to folder where you want to work
-setwd("...")
-
-# Source script with metrics functions, assumes you have saved this script to your working directory 
-source("accFunctions.R")
 
 # Name of folder in wd that contains the raw data files
-inputFolder <- "Raw_Data"
+inputFolder <- "raw_data"
 # Name of folder in wd that will recieve output files
-outputFolder <- "Acc_Data"
+outputFolder <- "outputs/activity/acc_data"
 
 ###########################################
 # Use this script to run each accelerometer file individually.
@@ -36,42 +38,34 @@ outputFolder <- "Acc_Data"
 
 ###########################################
 
-theFiles <- list.files(inputFolder)
-
-#for (i in 1:length(theFiles)) {
-i = 1
-
-dat <- read.csv(theFiles[i], stringsAsFactors = F)
-dat$time <- as.POSIXct(dat$time)
-head(dat)
-
-print(paste("Getting basic metrics for", dat$tag[1] , "at", format(Sys.time(), "%T")))
+print(paste("Getting basic metrics for", datacc$device_id[1] , "at", format(Sys.time(), "%T")))
 
 # Make sure data are in chronological order before processing
-dat <- dat[order(dat$Timestamp),]
+#datacc <- dat[order(c(dat$device_id, dat$UTC_timestamp)),]
 
 # Run function to calculate movement metrics
-lets <- getMetrics(data = dat, # Name of object holding data
-                   tagID = tag, # Tag identifier
-                   time = Timestamp, # Date field
-                   heave = Z, # Axis of vertical movement
-                   sway = Y, # Axis oflateral movement 
-                   surge = X, # Axis of horizontal movement
+lets <- getMetrics(data = datacc, # Name of object holding data
+                   tagID = device_id, # Tag identifier
+                   time = UTC_timestamp, # Date field
+                   heave = acc_z, # Axis of vertical movement
+                   sway = acc_x, # Axis oflateral movement 
+                   surge = acc_y, # Axis of horizontal movement
                    window = myWindow, # Interval for averaging metrics
                    frequency = myFreq, # Accelerometer sampling frequency
                    keep = c() # If there are other variables in the data you want to retain, include here as a list of variable names
 )
+View(lets)
 
 # Run function to calculate wing beat frequency
-lets$WBF <- getFrequency(variable = lets$Z, # Variable name for frequency calculation
+lets$WBF <- getFrequency(variable = lets$acc_z, # Variable name for frequency calculation
                          WBFwindow = myWBFWindow, # Window to calculate peak frequency in
                          frequency = myFreq, # Sampling frequency of accelerometer
                          sample = mySubsample, # Subsampling interval for calculations
                          threshold = myThreshold # Minimum amplitude to be considered a wingbeat - you can start by setting this to 0 and try increasing values to see how it changes your results
 )
 
-# Create an index to select all data with a WBF between 3 and 6 - different species will need different values
-WBFidx <- which(lets$WBF > 3 &lets$WBF < 6)
+# Create an index to select all data with a WBF between 3 and 9 - different species will need different values
+WBFidx <- which(lets$WBF > 3 &lets$WBF < 9) # Values taken from De Meis et al. (2025), suitable for pigeons
 
 # Determine the median value for each axis
 standX <- mean(lets$X[WBFidx])
@@ -79,17 +73,17 @@ standY <- mean(lets$Y[WBFidx])
 standZ <- mean(lets$Z[WBFidx]) + 1
 
 # Use median values during flight to standardize the axes from the original data
-dat$X <- ((lets$X) - (standX)) 
-dat$Y <- (lets$Y) - (standY)
-dat$Z <- ((lets$Z) - (standZ)) 
+datacc$X <- ((lets$X) - (standX)) 
+datacc$Y <- (lets$Y) - (standY)
+datacc$Z <- ((lets$Z) - (standZ)) 
 
 # Run function to calculate movement metrics again using the standardized values of X, Y, Z
-newData <- getMetrics(data = dat, # Name of object holding data
-                      tagID = tag, # Tag identifier
-                      time = Timestamp, # Date field
-                      heave = Z, # Axis of vertical movement
-                      sway = Y, # Axis oflateral movement 
-                      surge = X, # Axis of horizontal movement
+newData <- getMetrics(data = datacc, # Name of object holding data
+                      tagID = device_id, # Tag identifier
+                      time = UTC_timestamp, # Date field
+                      heave = acc_z, # Axis of vertical movement
+                      sway = acc_y, # Axis oflateral movement 
+                      surge = acc_x, # Axis of horizontal movement
                       window = myWindow, # Interval for averaging metrics
                       frequency = myFreq, # Accelerometer sampling frequency
                       keep = c() # If there are other variables in the data you want to retain, include here as a list of variable names
@@ -138,10 +132,13 @@ print(pp)
 #######################
 # Write files to a new folder
 
-#newFileName <- paste(outputFolder, "/" ,dat$tag[1], "_Acc.csv", sep = "" )
-#write.csv(subData, newFileName, row.names = F)
-
-#}
+dat_acc <- paste(outputFolder, "/" ,dat$tag[1], "dat_acc.csv", sep = "" )
+write.csv(subData, dat_acc, row.names = F)
 
 
+# Create path to save acc data
+output_activity_accdata <- paste0(pigeon_path,"/outputs/activity/acc_data/")
+dir.create(output_activity_accdata, showWarnings = FALSE, recursive = T)
 
+# save subData
+save(subData, file = paste0(output_activity_accdata, "dat_acc_process_accelerometer.RData"))
