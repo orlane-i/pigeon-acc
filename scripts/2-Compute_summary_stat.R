@@ -6,6 +6,10 @@ cat("\n# SCRIPT 2 : COMPUTING SUMMARY STATISTICS #\n\n")
 ##################################
 #   1- Summary statistics       #
 #################################
+library(dplyr)
+library(tidyverse)
+library(zoo)
+library(xts)
 
 #dat.xts <- lapply(dat.xts, function(acc.xts) {
 
@@ -29,6 +33,9 @@ load(paste0(output_activity_data,"dat_list_all_indiv_script1.RData"))
 # initiate dat.1s.xts list
 dat.1s.xts <- list()
 
+indiv <- dat.xts[[1]]
+indiv
+
 for (indiv in names(dat.xts)) {
   
   acc.xts <- dat.xts[[indiv]]
@@ -36,24 +43,22 @@ for (indiv in names(dat.xts)) {
 
   cat("\n# SCRIPT 2 : COMPUTING SUMMARY STATISTICS for indiv #\n", indiv,"\n")
   
-  
 ##### Insert NAs in gaps  #####
   
-  # remove GPS data to keep 10data per sec for rolling functions
-  GPSindexes <- dat_list[[indiv]]$UTC_timestamp[dat_list[[indiv]]$datatype == "GPS"]
+  # remove GPS data to keep 20data per sec for rolling functions
+  GPSindexes <- dat_list[[indiv]]$UTC_timestamp[dat_list[[indiv]]$datatype == "GPS"] + 0.001 #%>% as.POSIXct(.,"%Y-%m-%d %H:%M:%OS",tz= "UTC")
   GPSxts <- acc.xts[GPSindexes,]
   acc.xts <- acc.xts[!index(acc.xts) %in% GPSindexes, ]
 
   ### Insert 3s (i.e. 3*samp.Hz) of NA values between each accelerometry burst and between sequence -> (to avoid overlaps of moving window between bursts or different obs sequences i.e. avoid compute mean including accel data with large time gaps)
-  samp.Hz<- 10 # sampling frequency for accelerometry bursts (in Hertz)
-  acc.burst.endtimes <- dat_list[[indiv]]$UTC_timestamp[dat_list[[indiv]]$datatype == "SEN_ACC_10Hz_END"]
+  samp.Hz <- 20 # sampling frequency for accelerometry bursts (in Hertz)
+  acc.burst.endtimes <- dat_list[[indiv]]$UTC_timestamp[dat_list[[indiv]]$datatype == "SEN_ALL_20Hz_END"|dat_list[[indiv]]$datatype == "SEN_ALL_20Hz_ENDINT"]
   if(length(acc.burst.endtimes) > 0){
     times.to.insert<- do.call(c, lapply(acc.burst.endtimes, FUN= function(x) seq(from= x + 1/samp.Hz, to= x + 3 , by=  1/samp.Hz))) # generate sequences of time indices starting after each burst endtime
     augmented.xts<- xts::xts(order.by= c(zoo::index(acc.xts), times.to.insert), tzone ="UTC") # create an empty xts object containing combined time indexes of acc.xts and times.to.insert i.e acc.xts times + gaps of 3s between bursts
     acc.xts <- merge(augmented.xts, acc.xts, fill= NA)# insert empty data (-> 30 NAs) at each gap greater than 3s in acc.xts
   }
   
-
 ###### 1. Summary statistics ######
 
 acc.zoo= zoo::as.zoo(acc.xts)# zoo::rollapply on xts do not support argument needed : convert xts object in zoo to use the zoo::zoo::rollapply function 
@@ -68,7 +73,7 @@ acc.xts$sway.mu.1s <- zoo::rollapply(data= acc.zoo$acc_x, width= 1*samp.Hz, by= 
 acc.xts$heav.mu.1s <- zoo::rollapply(data= acc.zoo$acc_z, width= 1*samp.Hz, by= 1, FUN= mean, partial= T, fill= NA, align= "right", na.rm = T)
 
 # compute dynamic acceleration (detrended raw data)
-acc.xts$surg.dyn<- acc.xts$acc_y - acc.xts$surg.mu.1s  # dyn accel = raw data - rolling mean(en 10hz) == raw data - static accel(10hz)
+acc.xts$surg.dyn<- acc.xts$acc_y - acc.xts$surg.mu.1s  # dyn accel = raw data - rolling mean(en 20hz) == raw data - static accel(20hz)
 acc.xts$sway.dyn<- acc.xts$acc_x - acc.xts$sway.mu.1s
 acc.xts$heav.dyn<- acc.xts$acc_z - acc.xts$heav.mu.1s
 
@@ -78,11 +83,11 @@ acc.xts$VeDBA<- sqrt(acc.xts$surg.dyn^2 + acc.xts$sway.dyn^2 + acc.xts$heav.dyn^
 acc.xts$SDBA<- sqrt(acc.xts$sway.dyn^2 + acc.xts$heav.dyn^2)
 
 # plot correlation
-#plot(as.vector(acc.xts$SDBA), as.vector(abs(acc.xts$heav.dyn)), pch= ".", col= rgb(0, 0, 0, 0.6))
+plot(as.vector(acc.xts$SDBA), as.vector(abs(acc.xts$heav.dyn)), pch= ".", col= rgb(0, 0, 0, 0.6))
 
 # Sub-sample data at 1Hz frequency
 
-## sub-sample data at 1s interval => @ 1Hz accel data (step: by 10 i.e gives a results every 10 data)
+## sub-sample data at 1s interval => @ 1Hz accel data (step: by 20 i.e gives a results every 20 data)
 # Static acceleration on a 1s window
 acc.1s.xts<- xts::xts(x= zoo::rollapply(data= acc.zoo$acc_y, width= 1*samp.Hz, by= 1*samp.Hz, FUN= mean, partial= T, fill= NA, align= "right", na.rm= T))
 names(acc.1s.xts)<- "surg.mu.1s"
@@ -112,7 +117,7 @@ acc.1s.xts$sway.dyn.3s<- zoo::rollapply(data= acc.zoo$sway.dyn, width= 3*samp.Hz
 acc.1s.xts$heav.dyn.3s<- zoo::rollapply(data= acc.zoo$heav.dyn, width= 3*samp.Hz, by= 1*samp.Hz, FUN= mean, partial= T, fill= NA, align= "right", na.rm= T)
 
 
-# compute rolling SD on a 1s window on 1Hz accel data (step: by 10)  #inutile ?
+# compute rolling SD on a 1s window on 1Hz accel data (step: by 20)  #inutile ?
 acc.1s.xts$surg.dyn.sd.1s<- zoo::rollapply(data= acc.zoo$surg.dyn, width= 1*samp.Hz, by= 1*samp.Hz, FUN= sd, partial= T, fill= NA, align= "right", na.rm= T)
 acc.1s.xts$sway.dyn.sd.1s<- zoo::rollapply(data= acc.zoo$sway.dyn, width= 1*samp.Hz, by= 1*samp.Hz, FUN= sd, partial= T, fill= NA, align= "right", na.rm= T)
 acc.1s.xts$heav.dyn.sd.1s<- zoo::rollapply(data= acc.zoo$heav.dyn, width= 1*samp.Hz, by= 1*samp.Hz, FUN= sd, partial= T, fill= NA, align= "right", na.rm= T)
@@ -161,7 +166,7 @@ acc.1s.xts$PDBAY.mu.3s<- zoo::rollapply(data= acc.zoo$PDBAY, width= 3*samp.Hz, b
 acc.1s.xts$PDBAZ.mu.3s<- zoo::rollapply(data= acc.zoo$PDBAZ, width= 3*samp.Hz, by= 1*samp.Hz, FUN= mean, partial= T, fill= NA, align= "right", na.rm= T)
 
 # Overall dynamic body acceleration @ 1 & 3 HZ
-acc.xts$ODBA <- acc.xts$PDBAY + acc.xts$PDBAX +acc.xts$PDBAZ # 10Hz
+acc.xts$ODBA <- acc.xts$PDBAY + acc.xts$PDBAX +acc.xts$PDBAZ # 20Hz
 
 acc.1s.xts$ODBA.mu.1s <- acc.1s.xts$PDBAY.mu.1s + acc.1s.xts$PDBAX.mu.1s +acc.1s.xts$PDBAZ.mu.1s # 1Hz
 acc.1s.xts$ODBA.mu.3s <- acc.1s.xts$PDBAY.mu.3s + acc.1s.xts$PDBAX.mu.3s +acc.1s.xts$PDBAZ.mu.3s 
@@ -209,10 +214,10 @@ acc.1s.xts <- acc.1s.xts[to.keep, ] # delete rows with at least one NA var
 
 # transform in df to rbind data
 acc.df <- data.frame(acc.xts) %>% dplyr::mutate(index = index(acc.xts),
-                                                datatype = NA) # ifelse(index %in% acc.burst.endtimes, "SEN_ACC_10Hz_END", NA) # do not add end bursts as they are shifted with rolling functions (ends up in the middle of meaned estimates)
+                                                datatype = NA) # ifelse(index %in% acc.burst.endtimes, "SEN_ACC_20Hz_END", NA) # do not add end bursts as they are shifted with rolling functions (ends up in the middle of meaned estimates)
 
 acc.1s.df <- data.frame(acc.1s.xts) %>% dplyr::mutate(index = index(acc.1s.xts),
-                                                datatype = NA) # ifelse(index %in% acc.burst.endtimes, "SEN_ACC_10Hz_END", NA) # do not add end bursts as they are shifted with rolling functions (ends up in the middle of meaned estimates)
+                                                datatype = NA) # ifelse(index %in% acc.burst.endtimes, "SEN_ACC_20Hz_END", NA) # do not add end bursts as they are shifted with rolling functions (ends up in the middle of meaned estimates)
 
 gps.df <- data.frame(GPSxts) %>% dplyr::mutate(index = index(GPSxts),
                                                 datatype = "GPS")
@@ -251,7 +256,7 @@ acc.1s.xts <- acc.1s.xts[order(index(acc.1s.xts))]
 cat("\n# SCRIPT 2 : PLOTING SUMMARY STATISTICS #\n\n")
 
 # Create path to save data
-output_data_path_indiv <- paste0(snipe_path,"/outputs/by_indiv/",indiv,"/data") # indiv = indiv_id
+output_data_path_indiv <- paste0(pigeon_path,"/outputs/by_indiv/",indiv,"/data") # indiv = indiv_id
 dir.create(output_data_path_indiv ,showWarnings = FALSE, recursive = T)
 
 # save data in rdata files
@@ -264,7 +269,7 @@ save(acc.1s.xts,file= paste0(output_data_path_indiv, "/acc.1s.xts_script2.RData"
 ##### Plot summary statistics  #####
 
 # Create path to save plots in indiv files
-output_data_path_plot <- paste0(snipe_path,"/outputs/by_indiv/",indiv,"/accel_plots")
+output_data_path_plot <- paste0(pigeon_path,"/outputs/by_indiv/",indiv,"/accel_plots")
 dir.create(output_data_path_plot ,showWarnings = FALSE, recursive = T)
 
 
