@@ -1,7 +1,6 @@
 ########################################
 #   STEP 1 : IMPORT AND PREPARE DATA   #
 ########################################
-rm(list = ls())
 
 cat("\n# SCRIPT 1 : IMPORT AND CLEAN DATA #\n\n")
 
@@ -18,57 +17,123 @@ pigeon_path <- here::here()
 # load data
 lf <- list.files(paste0(pigeon_path,"/data/")) # list all file names in DATA folder
 lf <- lf[grep("csv", lf)] # grap csv file within lf list
-lf
 
 # combine all files within one data frame
 dat <- NULL
 for (i in 1:length(lf)){
   dat1 <- data.table::fread(paste0(pigeon_path, "/data/", lf[i]), data.table = FALSE)
   dat1$file <- lf[i] # create "file" column
-  dat1$indiv_id <- strsplit(dat1$file, "_", "_")[[1]][2] # create "indiv_id" column by splitting file names
   dat <- rbind(dat,dat1)
 }
 
-# create a var with local timestamp
+dat$device_id<-factor(dat$device_id)
+
+# set correspondance between device id and indiv name
 library(dplyr)
+mapping <- tibble(
+  device_id = c(
+    "233087","233087",
+    "233090","233121",
+    "233088","233127",
+    "233089",
+    "233119",
+    "233121","231900",
+    "233122","233119",
+    "233120","231899",
+    "231900","233090",
+    "231897",
+    "231898","233088",
+    "231902","231901",
+    "231898",
+    "233120",
+    "231902",
+    "233091",
+    "233122",
+    "233092"
+  ),
+  
+  date_debut = as.Date(c(
+    "2023-06-26","2023-07-07",
+    "2023-06-26","2023-07-07",
+    "2023-06-26","2023-07-07",
+    "2023-06-26",
+    "2023-06-26",
+    "2023-06-26","2023-07-07",
+    "2023-06-26","2023-07-07",
+    "2023-06-26","2023-07-07",
+    "2023-06-26","2023-07-07",
+    "2023-06-26",
+    "2023-06-26","2023-07-07",
+    "2023-06-26","2023-07-07",
+    "2023-07-07",
+    "2023-07-07",
+    "2023-07-07",
+    "2023-07-07",
+    "2023-07-07",
+    "2023-07-07"
+  )),
+  
+  date_fin = as.Date(c(
+    "2023-07-06","2023-07-31",
+    "2023-07-06","2023-07-31",
+    "2023-07-06","2023-07-31",
+    "2023-07-06",
+    "2023-07-06",
+    "2023-07-06","2023-07-31",
+    "2023-07-06","2023-07-31",
+    "2023-07-06","2023-07-31",
+    "2023-07-06","2023-07-31",
+    "2023-07-06",
+    "2023-07-06","2023-07-31",
+    "2023-07-06","2023-07-31",
+    "2023-07-31",
+    "2023-07-31",
+    "2023-07-31",
+    "2023-07-31",
+    "2023-07-31",
+    "2023-07-31"
+  )),
+  
+  indiv_id = c(
+    "FR2021284043","FR2021239893",
+    "FR2018394142","FR2018394142",
+    "FR2022160870","FR2022160870",
+    "FR2017193558",
+    "FR2018394114",
+    "FR2021284021","FR2021284021",
+    "FR2021284035","FR2021284035",
+    "FR2022013358","FR2022013358",
+    "FR2017193529","FR2017193529",
+    "FR2021284034",
+    "FR2022160883","FR2022160883",
+    "FR2017193535","FR2017193535",
+    "FR2020355491",
+    "FR2022160852",
+    "FR2018304114",
+    "FR2022160868",
+    "FR2021284046",
+    "FR2020005213"
+  )
+)
+
+# add indiv name in data
+dat$UTC_date <- as.Date(dat$UTC_date)
+
+dat <- dat %>%
+  mutate(UTC_date = as.Date(UTC_date)) %>%
+  left_join(mapping, by = "device_id") %>%
+  filter(UTC_date >= date_debut & UTC_date <= date_fin) %>% # clean tracks (delete rows before 2023-06-26)
+  select(-date_debut, -date_fin)
+
+# create a var with local timestamp
 dat <- dat %>% dplyr::mutate(local_timestamp = as.POSIXct(UTC_timestamp,"%Y-%m-%d %H:%M:%OS",tz = "Europe/Paris"))
 
-# clean tracks
-dat <- subset(dat, UTC_date>'2023-06-25'&(UTC_date<'2023-06-29'|UTC_date>'2023-07-06')) # remove all rows before june 26 + between june 29 and july 7
-View(dat)
-
 cn <- names(dat)
-head(dat)
-tail(dat)
-View(dat)
 
 cat("\n# SCRIPT 1 :\n Data from file -",unique(dat$file),"\n indiv -",unique(dat$indiv_id),"\n have been loaded\n\n")
 
-colnames(dat)
-summary(dat)
-
-##############################################################################################################################################################################
-
-##############################################################################################################################################################################
-
-# to work with all indiv data pre treated
-#
-# load selected indiv data
-#file <- "dat_pigeon_selected_filtered.csv"
-#dat <- data.table::fread(paste(pigeon_path, "outputs/data_exploration", file, sep = "/"), data.table = FALSE, drop = "V1")
-#
-## to work with all indiv data
-#load(here::here("outputs/activity/data_exploration/script0_dat_all_indiv_pigeon.RData"))
-
 # split data by indiv
 dat_list <- split(dat, f = dat$indiv_id)
-
-# create sample test 
-ind <- head(dat, 10000)
-View(ind)
-
-#subsample first indiv of data list
-ind <- dat_list[[1]]
 
 library(zoo)
 dat.xts <- lapply(dat_list, function(ind) {
