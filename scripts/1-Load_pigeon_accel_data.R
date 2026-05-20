@@ -16,7 +16,7 @@ pigeon_path <- here::here()
 
 # load data
 lf <- list.files(paste0(pigeon_path,"/data/")) # list all file names in DATA folder
-lf <- lf[grep("csv", lf)] # grap csv file within lf list
+lf <- lf[grep("0.csv", lf)] # grap csv file within lf list
 
 # combine all files within one data frame
 dat <- NULL
@@ -26,107 +26,123 @@ for (i in 1:length(lf)){
   dat <- rbind(dat,dat1)
 }
 
+dat <- dat[-c(1:12), ] # remove first GPS data = errors
+
 dat$device_id<-factor(dat$device_id)
 
-# set correspondance between device id and indiv name
-library(dplyr)
-mapping <- tibble(
-  device_id = c(
-    "233087","233087",
-    "233090","233121",
-    "233088","233127",
-    "233089",
-    "233119",
-    "233121","231900",
-    "233122","233119",
-    "233120","231899",
-    "231900","233090",
-    "231897",
-    "231898","233088",
-    "231902","231901",
-    "231898",
-    "233120",
-    "231902",
-    "233091",
-    "233122",
-    "233092"
-  ),
+# load metadata
+metadata <- read.csv("data/metadata.csv", header = TRUE, sep = ";", stringsAsFactors = TRUE)
+head(metadata)
+summary(metadata)
+metadata$device_id_june26 <- factor(metadata$device_id_june26)
+metadata$device_id_july7 <- factor(metadata$device_id_july7)
+
+library(tidyverse)
+
+metadata_long <- metadata %>%
+  # pivot devices
+  pivot_longer(
+    cols = matches("^device_(id|type)_"),
+    names_to = c(".value", "UTC_date"),
+    names_pattern = "(device_id|device_type)_(.*)"
+  ) %>%
   
-  date_debut = as.Date(c(
-    "2023-06-26","2023-07-07",
-    "2023-06-26","2023-07-07",
-    "2023-06-26","2023-07-07",
-    "2023-06-26",
-    "2023-06-26",
-    "2023-06-26","2023-07-07",
-    "2023-06-26","2023-07-07",
-    "2023-06-26","2023-07-07",
-    "2023-06-26","2023-07-07",
-    "2023-06-26",
-    "2023-06-26","2023-07-07",
-    "2023-06-26","2023-07-07",
-    "2023-07-07",
-    "2023-07-07",
-    "2023-07-07",
-    "2023-07-07",
-    "2023-07-07",
-    "2023-07-07"
-  )),
+  # pivot masses
+  pivot_longer(
+    cols = starts_with("mass_"),
+    names_to = "date_mass",
+    names_prefix = "mass_",
+    values_to = "mass"
+  ) %>%
   
-  date_fin = as.Date(c(
-    "2023-07-06","2023-07-31",
-    "2023-07-06","2023-07-31",
-    "2023-07-06","2023-07-31",
-    "2023-07-06",
-    "2023-07-06",
-    "2023-07-06","2023-07-31",
-    "2023-07-06","2023-07-31",
-    "2023-07-06","2023-07-31",
-    "2023-07-06","2023-07-31",
-    "2023-07-06",
-    "2023-07-06","2023-07-31",
-    "2023-07-06","2023-07-31",
-    "2023-07-31",
-    "2023-07-31",
-    "2023-07-31",
-    "2023-07-31",
-    "2023-07-31",
-    "2023-07-31"
-  )),
+  # keep only rows where dates match
+  filter(UTC_date == date_mass) %>%
   
-  indiv_id = c(
-    "FR2021284043","FR2021239893",
-    "FR2018394142","FR2018394142",
-    "FR2022160870","FR2022160870",
-    "FR2017193558",
-    "FR2018394114",
-    "FR2021284021","FR2021284021",
-    "FR2021284035","FR2021284035",
-    "FR2022013358","FR2022013358",
-    "FR2017193529","FR2017193529",
-    "FR2021284034",
-    "FR2022160883","FR2022160883",
-    "FR2017193535","FR2017193535",
-    "FR2020355491",
-    "FR2022160852",
-    "FR2018304114",
-    "FR2022160868",
-    "FR2021284046",
-    "FR2020005213"
+  # cleaning
+  select(-date_mass, -X) %>%
+  
+  # convert date to right format
+  mutate(
+    UTC_date = recode(UTC_date,
+                  "june26" = "2023-06-26",
+                  "july7"  = "2023-07-07"),
+    UTC_date = as.Date(UTC_date)
   )
-)
 
-# add indiv name in data
-dat$UTC_date <- as.Date(dat$UTC_date)
-
+# add metadata to main data frame (add indiv names)
 dat <- dat %>%
   mutate(UTC_date = as.Date(UTC_date)) %>%
-  left_join(mapping, by = "device_id") %>%
-  filter(UTC_date >= date_debut & UTC_date <= date_fin) %>% # clean tracks (delete rows before 2023-06-26)
-  select(-date_debut, -date_fin)
+  left_join(metadata_long, by = NULL) %>% # by = NULL : join using all variables in common across dat and metadata_long
+  filter(UTC_date >= "2023-06-26") %>% # clean  irrelevant tracks (delete rows before 2023-06-26)
+  mutate(local_timestamp = as.POSIXct(UTC_timestamp,"%Y-%m-%d %H:%M:%OS",tz = "Europe/Paris")) # add col with local time
 
-# create a var with local timestamp
-dat <- dat %>% dplyr::mutate(local_timestamp = as.POSIXct(UTC_timestamp,"%Y-%m-%d %H:%M:%OS",tz = "Europe/Paris"))
+# create body condition metrics = ratio mass/LT
+dat$body_condition <- dat$mass/dat$LT
+
+# create accoutumance metrics ("habituation") UTC_date < 2023-07-07 = NO / UTC_date >= 2023-07-07 = YES
+dat$habituation <- ifelse(dat$UTC_date < as.Date("2023-07-07"),
+                          "NO",
+                          "YES")
+dat$habituation <- factor(dat$habituation, levels = c("NO", "YES"))
+
+# create duration metrics (duration of tracking by indiv)
+dat <- dat %>%
+  group_by(indiv_id) %>%
+  mutate(duration_hours = as.numeric(max(local_timestamp) - min(local_timestamp), units = "hours")) %>%
+  ungroup()
+# min duration = 3.26h, max duration = 277h
+
+# get mean duration without NA's
+dat %>%
+  group_by(indiv_id) %>%
+  summarise(duration_hours = first(duration_hours)) %>%
+  summarise(mean_duration = mean(duration_hours, na.rm = TRUE)) # mean_duration = 142h
+
+# create session variable and calculate duration by indiv and by session
+dat <- dat %>%
+  mutate(
+    session = ifelse(as.Date(local_timestamp) < as.Date("2023-07-07"),
+                     "session1",
+                     "session2"),
+    session = factor(session)
+  ) %>%
+  group_by(indiv_id, session) %>%
+  mutate(duration_session = as.numeric(max(local_timestamp) - min(local_timestamp),
+                                             units = "hours")) %>%
+  ungroup()
+
+### visualize duration
+library(ggplot2)
+plot_data <- dat %>%
+  filter(!is.na(indiv_id)) %>%
+  group_by(indiv_id, session) %>%
+  summarise(duration_session = first(duration_session), .groups = "drop")
+
+ggplot(plot_data, aes(x = indiv_id, y = duration_session, fill = session)) +
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# # get summary duration without NA's
+# dat %>%
+#   group_by(session, indiv_id) %>%
+#   summarise(duration_session = first(duration_session)) %>%
+#   summarise(mean_duration = mean(duration_session, na.rm = TRUE),
+#             min_duration = min(duration_session, na.rm = TRUE),
+#             max_duration = max(duration_session, na.rm = TRUE), 
+#             median_duration = median(duration_session, na.rm = TRUE)
+#             )
+# # session  mean_duration min_duration max_duration median_duration
+# # session1          27.2         1.50         235.            12.6
+# # session2          26.3         2.32         295.            10.9
+# 
+# # calculate duration by indiv and by session
+# duration_session <- dat %>%
+#   group_by(indiv_id, session) %>%
+#   summarise(
+#     duration_hours = as.numeric(max(local_timestamp) - min(local_timestamp), units = "hours"),
+#     .groups = "drop"
+#   )
 
 cn <- names(dat)
 
@@ -146,7 +162,7 @@ dat.xts <- lapply(dat_list, function(ind) {
   col.pal4 <- RColorBrewer::brewer.pal(4, "Set2")
   
   # Plot red tag data
-  acc.xts <- xts::xts(ind[, c("acc_x", "acc_y", "acc_z", "bat_soc_pct", "Latitude", "Longitude", "MSL_altitude_m", "speed_km/h", "int_temperature_C")], order.by = ind$UTC_timestamp) # cannot keep character var
+  acc.xts <- xts::xts(ind[, c("acc_x", "acc_y", "acc_z", "bat_soc_pct", "Latitude", "Longitude", "MSL_altitude_m", "speed_km/h", "int_temperature_C")], order.by = ind$local_timestamp) # cannot keep character var
   xts::tformat(acc.xts) <- "%Y-%m-%d %H:%M:%OS4"
   
   index(acc.xts)<- index(acc.xts) + 0.001 # add small constant to avoid rounding error of fractional seconds 
