@@ -14,7 +14,8 @@ library(xts)
 #dat.xts <- lapply(dat.xts, function(acc.xts) {
 
 #### load data from script 1 if script launched alone
-
+pigeon_path <- here::here()
+output_activity_data <- paste0(pigeon_path,"/outputs/activity/raw_data/")
 # load dat xts
 load(paste0(output_activity_data,"dat_xts_all_indiv_script1.RData"))
 #load dat list
@@ -33,9 +34,6 @@ load(paste0(output_activity_data,"dat_list_all_indiv_script1.RData"))
 # initiate dat.1s.xts list
 dat.1s.xts <- list()
 
-indiv <- dat.xts[[1]]
-indiv
-
 for (indiv in names(dat.xts)) {
   
   acc.xts <- dat.xts[[indiv]]
@@ -46,16 +44,16 @@ for (indiv in names(dat.xts)) {
 ##### Insert NAs in gaps  #####
   
   # remove GPS data to keep 20data per sec for rolling functions
-  GPSindexes <- dat_list[[indiv]]$UTC_timestamp[dat_list[[indiv]]$datatype == "GPS"] + 0.001 #%>% as.POSIXct(.,"%Y-%m-%d %H:%M:%OS",tz= "UTC")
+  GPSindexes <- dat_list[[indiv]]$local_timestamp[dat_list[[indiv]]$datatype == "GPS"] + 0.001 #%>% as.POSIXct(.,"%Y-%m-%d %H:%M:%OS",tz= "UTC+2")
   GPSxts <- acc.xts[GPSindexes,]
   acc.xts <- acc.xts[!index(acc.xts) %in% GPSindexes, ]
 
   ### Insert 3s (i.e. 3*samp.Hz) of NA values between each accelerometry burst and between sequence -> (to avoid overlaps of moving window between bursts or different obs sequences i.e. avoid compute mean including accel data with large time gaps)
   samp.Hz <- 20 # sampling frequency for accelerometry bursts (in Hertz)
-  acc.burst.endtimes <- dat_list[[indiv]]$UTC_timestamp[dat_list[[indiv]]$datatype == "SEN_ALL_20Hz_END"|dat_list[[indiv]]$datatype == "SEN_ALL_20Hz_ENDINT"]
+  acc.burst.endtimes <- dat_list[[indiv]]$local_timestamp[dat_list[[indiv]]$datatype == "SEN_ALL_20Hz_END"|dat_list[[indiv]]$datatype == "SEN_ALL_20Hz_ENDINT"]
   if(length(acc.burst.endtimes) > 0){
     times.to.insert<- do.call(c, lapply(acc.burst.endtimes, FUN= function(x) seq(from= x + 1/samp.Hz, to= x + 3 , by=  1/samp.Hz))) # generate sequences of time indices starting after each burst endtime
-    augmented.xts<- xts::xts(order.by= c(zoo::index(acc.xts), times.to.insert), tzone ="UTC") # create an empty xts object containing combined time indexes of acc.xts and times.to.insert i.e acc.xts times + gaps of 3s between bursts
+    augmented.xts<- xts::xts(order.by= c(zoo::index(acc.xts), times.to.insert), tzone ="Europe/Paris") # create an empty xts object containing combined time indexes of acc.xts and times.to.insert i.e acc.xts times + gaps of 3s between bursts
     acc.xts <- merge(augmented.xts, acc.xts, fill= NA)# insert empty data (-> 30 NAs) at each gap greater than 3s in acc.xts
   }
   
@@ -236,11 +234,11 @@ gps.1s.df <- gps.1s.df[ , names(acc.1s.df)]
 # rbind gps data
 acc.df <- rbind(acc.df, gps.df)
 acc.xts <- xts(acc.df[ , setdiff(names(acc.df), "index")], # remove index column
-               order.by = acc.df$index, tzone = "UTC")
+               order.by = acc.df$index, tzone = "Europe/Paris")
 
 acc.1s.df <- rbind(acc.1s.df, gps.1s.df)
 acc.1s.xts <- xts(acc.1s.df[ , setdiff(names(acc.1s.df), "index")], # remove index column
-               order.by = acc.1s.df$index, tzone = "UTC")
+               order.by = acc.1s.df$index, tzone = "Europe/Paris")
 
 # reorder by index in case
 acc.xts <- acc.xts[order(index(acc.xts))]
@@ -308,7 +306,18 @@ htmlwidgets::saveWidget(newplot, file= paste(output_data_path_plot, "static_3s_a
 
 
 # save df in dat.xts list
+
+ind <- rep(indiv, nrow(acc.xts))
+
+acc.xts$indiv <- ind
+
+  
+ind <- rep(indiv, nrow(acc.1s.xts))
+acc.1s.xts$indiv <- ind
+
+
 dat.xts[[indiv]] <- acc.xts 
+
 
 dat.1s.xts[[indiv]] <- acc.1s.xts 
 
